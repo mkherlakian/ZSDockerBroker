@@ -1,0 +1,11 @@
+{
+    "require": {
+        "stage1/docker-php": "@dev",
+        "zendframework/zend-cache": "*",
+        "zendframework/zend-log": "*",
+        "zendframework/zend-serializer": "*"
+    },
+    "autoload": {
+        "psr-0": {"ZSDockerBroker": "src/"}
+    }
+}
