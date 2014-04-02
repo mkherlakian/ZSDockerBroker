@@ -157,9 +157,16 @@ class ZSDockerBroker {
         flock($fp, LOCK_EX);
 
         $list = $this->getCache()->getItem('zslist');
+        is_array($list) || $list = array();
+
         while(true) {
             $containerId = key($list);
             $container = current($list);
+
+            if(!$container) {
+                break;
+            }
+
             $this->getLog()->log(Logger::DEBUG, "Checking if {$containerId} ({$container['name']}) needs to be cleaned up...");
 
             if($container['status'] == Node::STATUS_UNJOINED) {
@@ -220,7 +227,11 @@ class ZSDockerBroker {
 
     protected function isContainerForBrokerGroup($container, $variables) {
         $group = $variables->getClusterGroup();
-        $this->getLog()->log(Logger::INFO, "Container {$container['id']} ({$container['name']}) Node group is {$container['cluster']}, broker group is {$group}");
+        if($container['cluster']) {
+            $this->getLog()->log(Logger::INFO, "Container {$container['id']} ({$container['name']}) Node group is {$container['cluster']}, broker group is {$group}");
+        } else {
+            $this->getLog()->log(Logger::INFO, "Container {$container['id']} ({$container['name']}) has no node group, probably not a ZS node"); 
+        }
         return $container['cluster'] == $group;
     }
     
@@ -235,8 +246,10 @@ class ZSDockerBroker {
                 
 
         $list = $this->getCache()->getItem('zslist');
+        is_array($list) || $list = array();
+
         foreach($list as $id => $container) {
-            if($container['status'] == Node::STATUS_JOINED && !array_key_exists($id, $containers)) {
+                if($container['status'] == Node::STATUS_JOINED && !array_key_exists($id, $containers)) {
                 $nextRemove = $container;
                 break;
             }
@@ -268,7 +281,7 @@ class ZSDockerBroker {
         $nextContainer = false;
 
         $list = $this->getCache()->getItem('zslist');
-        if(!is_array($list)) $list = array();
+        is_array($list) || $list = array();
 
         foreach($containers as $container) {
             if($this->isContainerForBrokerGroup($container, $variables) 
@@ -309,7 +322,7 @@ class ZSDockerBroker {
                     
                     $containers[$container->getId()] = array(
                         'id'        => $container->getId(),
-                        'cluster'   => $matches[1],
+                        'cluster'   => isset($matches[1]) ? $matches[1] : null,
                         'name'      => substr($runtimeInfo['Name'], 1),
                         'ip'        => $runtimeInfo['NetworkSettings']['IPAddress'],
                         'container' => $container,
