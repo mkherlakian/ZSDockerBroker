@@ -14,4 +14,6 @@ class Node {
     const JOIN_ERROR = 5;
 
     const UNJOIN_ERROR = 6;
+
+    const STATUS_NEW = 7;
 }

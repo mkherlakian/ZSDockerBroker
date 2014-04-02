@@ -42,7 +42,7 @@ class ClusterOperations {
         $empty = array();
 
         foreach($required as $arg) {
-            if(!$params[$arg]) $empty[] = $required;
+            if(!$params[$arg]) $empty[] = $arg;
         }
 
         if(count($empty) > 0) {
@@ -52,7 +52,7 @@ class ClusterOperations {
         return array_merge($defaults, $params);
     }
 
-    public function joinCluster(array $params) {
+    public function joinCluster(array $params, &$serverInfo = null) {
         $defaults = array(
             'servername' => '', 
             'dbhost' => '',
@@ -80,16 +80,43 @@ class ClusterOperations {
         if($http) $command .= " --http='$http'";
         if($wait) $command .= " --wait=$wait";
 
-        $success = $this->runCommand($command);
+        $success = $this->runCommand($command, $output);
 
+        //retrieve serverId to pass out
+        if($success) {
+            $xml = new \SimpleXMLElement($output);
+            $id = (string)$xml->responseData->serverInfo->id;
+            $this->getLog()->log(Logger::DEBUG, "Added server $servername, id $id");
+            $serverInfo = array('clusterid' => $id);
+        } 
         return $success;
     }
     
-    public function unjoinCluster() {
+    public function unjoinCluster(array $params) {
+        $defaults = array(
+            'serverid' => '',
+            'zsurl' => '', 
+            'zskey' => '', 
+            'zssecret' => '', 
+            //'zsversion' => '6.1', 
+            'http' => '', 
+            'wait' => ''
+        );
 
+        $required = array('serverid', 'zsurl', 'zskey', 'zssecret');
+        $validated = $this->validateArgs($defaults ,$required, $params); 
+        extract($validated);
+
+        $command = "{$this->zsclient} clusterForceRemoveServer --serverId=$serverid --zsurl=$zsurl --zskey=$zskey --zssecret=$zssecret";
+        if($http) $command .= " --http='$http'";
+        if($wait) $command .= " --wait=$wait";
+        
+        $success = $this->runCommand($command);
+
+        return $success; 
     }
 
-    protected function runCommand($command) {
+    protected function runCommand($command, &$out = null) {
         $desc = array(
             1 => array('pipe', 'w'),
             2 => array('pipe', 'w')
@@ -101,10 +128,10 @@ class ClusterOperations {
         $err = stream_get_contents($pipes[2]);
         $return = proc_close($p);
         $this->getLog()->log(Logger::INFO, "Executed $command - return value was $return");
-        $this->getLog()->log(Logger::DEBUG, "RET: $return OUT was: $out, ERR was: $err");
+        $this->getLog()->log(Logger::DEBUG, "RET: $return OUT was: \n$out\n");
         
         if($return > 0) {
-            $this->getLog(Logger::ERROR, "Command was not successful. RET: $return OUT was: $out, ERR was: $err");
+            $this->getLog(Logger::CRIT, "Command was not successful. RET: $return OUT was: \n$out\n");
         }
         
         return ($return == 0); 

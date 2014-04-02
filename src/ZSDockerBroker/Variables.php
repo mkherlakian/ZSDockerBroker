@@ -2,6 +2,7 @@
 
 namespace ZSDockerBroker;
 
+
 class Variables {
     
     /**
@@ -39,21 +40,26 @@ class Variables {
      */
     protected $dbname;
 
-    public function __construct($apiKeyName, $apiKeySecret, $cluster, $dbhost, $dbuser, $dbpassword, $dbname) {
+    /**
+     * @var string
+     */
+    protected $clusterGroup;
+
+    public function __construct($apiKeyName, $apiKeySecret, $clusterGroup, $dbhost, $dbuser, $dbpassword, $dbname) {
         $this->apiKeyName = $apiKeyName;
         $this->apiKeySecret = $apiKeySecret;
-        $this->cluster = $cluster;
         $this->dbhost = $dbhost;
         $this->dbuser = $dbuser;
         $this->dbpassword = $dbpassword;
         $this->dbname = $dbname;
+        $this->clusterGroup = $clusterGroup;
     }
 
     /**
      * @var bool throw exception if var is not in ENV vars
      */
     public static function factoryFromEnv() {
-        $vars = array('ZSAPINAME', 'ZSAPISECRET', 'ZSCLUSTER', 'DBHOST', 'DBNAME', 'DBUSER', 'DBPASS');
+        $vars = array('ZSAPINAME', 'ZSAPISECRET', 'DBHOST', 'DBNAME', 'DBUSER', 'DBPASS', 'ZSCLUSTERGROUP');
         foreach($vars as $var) {
             $notFound = array();
             if(!getenv($var))
@@ -61,13 +67,13 @@ class Variables {
         }
 
         if(count($notFound) > 0) {
-            throw new Exception("Environment variables ".implode(', ', $notFound)." must be set.");
+            throw new \Exception("Environment variables ".implode(', ', $notFound)." must be set.");
         }
 
         return new self(
             getenv('ZSAPINAME'),
             getenv('ZSAPISECRET'),
-            getenv('ZSCLUSTER'),
+            getenv('ZSCLUSTERGROUP'),
             getenv('DBHOST'),
             getenv('DBUSER'),
             getenv('DBPASS'),
@@ -81,10 +87,6 @@ class Variables {
 
     public function getApiKeySecret() {
         return $this->apiKeySecret;
-    }
-
-    public function getCluster() {
-        return $this->cluster;
     }
 
     public function getDbHost() {
@@ -101,5 +103,9 @@ class Variables {
 
     public function getDbName() {
        return $this->dbname;
+    }
+
+    public function getClusterGroup() {
+        return $this->clusterGroup;
     }
 }

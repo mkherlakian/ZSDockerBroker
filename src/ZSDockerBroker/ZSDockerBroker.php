@@ -93,43 +93,170 @@ class ZSDockerBroker {
     public function run() {
         $variables = $this->getVariables();        
 
-        //2 steps: check if any servers we don't have in list, and check if any we have that are not there anymore
-        $containers = $this->retrieveZSContainers();        
-        $nextContainer = $this->getNextUnaddedContainer($containers);
-        if($nextContainer) {
-            //var_dump($nextContainer);
-            //var_dump($this->getCache()->getItem('zslist'));
-            $this->getLog()->log(Logger::INFO, "Found a new container - ID: {$nextContainer['id']}, trying to join cluster...");
-            
-            $joinParameters = array(
-                'servername' => $nextContainer['name'],
-                'dbhost'     => $variables->getDbHost(),
-                'dbuser'     => $variables->getDbUser(),
-                'dbpass'     => $variables->getDbPassword(),
-                'nodeip'     => $nextContainer['ip'],
-                'dbname'     => $variables->getDbName(),
-                'zsurl'      => "http://{$nextContainer['ip']}:10081/ZendServer",
-                'zskey'      => $variables->getApiKeyname(),
-                'zssecret'   => $variables->getApiKeysecret(),
-            ); 
-            $this->clusterOperations->joinCluster($joinParameters);
+        while (1) {
+            //2 steps: check if any servers we don't have in list, and check if any we have that are not there anymore
+            $containers = $this->retrieveZSContainers();        
+            $nextContainer = $this->getNextUnaddedContainer($containers, $variables);
+
+            if($nextContainer) {
+                //var_dump($nextContainer);
+                //var_dump($this->getCache()->getItem('zslist'));
+                $this->getLog()->log(Logger::INFO, "Found a new container - ID: {$nextContainer['id']}, trying to join cluster...");
+                
+                $joinParameters = array(
+                    'servername' => $nextContainer['name'],
+                    'dbhost'     => $variables->getDbHost(),
+                    'dbuser'     => $variables->getDbUser(),
+                    'dbpass'     => $variables->getDbPassword(),
+                    'nodeip'     => $nextContainer['ip'],
+                    'dbname'     => $variables->getDbName(),
+                    'zsurl'      => "http://{$nextContainer['ip']}:10081/ZendServer",
+                    'zskey'      => $variables->getApiKeyname(),
+                    'zssecret'   => $variables->getApiKeysecret(),
+                ); 
+                $serverInfo = array();
+                $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
+                $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
+
+                $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
+                $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
+            }
+           
+            $removedServer = $this->getNextRemovedServer($containers);
+            if($removedServer) {
+                $this->getLog()->log(Logger::INFO, "Server {$removedServer['id']} ({$removedServer['name']}) was removed, removing from cluster...");
+                
+                //Server to eexcute the unjoin op against
+                $randomContainer = $this->retrieveRandomJoinedServer($variables);
+                $this->getLog()->log(Logger::INFO, "Using server {$randomContainer['ip']} ({$randomContainer['name']}) to remove server {$removedServer['id']} ({$removedServer['name']})");
+
+                $unjoinParameters = array(
+                    'serverid'   => $removedServer['clusterid'],
+                    'zsurl'      => "http://{$randomContainer['ip']}:10081/ZendServer",
+                    'zskey'      => $variables->getApiKeyname(),
+                    'zssecret'   => $variables->getApiKeysecret(),
+                );            
+                
+                $success = $this->clusterOperations->unjoinCluster($unjoinParameters);
+                $status = $success ? Node::STATUS_UNJOINED : Node::UNJOIN_ERROR;
+
+                $this->getLog()->log(Logger::INFO, "Setting status $status for container {$removedServer['id']} ({$removedServer['name']})");
+                $this->setContainerInfo($removedServer, array('status' => $status));
+            }
+
+            $this->cleanUpList(); 
         }
-         
-        //var_dump($this->getCache()->getItem('zslist'));
-        //$this->clusterOperations->joinCluster(array());
+    }
+   
+    protected function cleanUpList() {
+        $fp = fopen($this->lockFile, 'w');
+        flock($fp, LOCK_EX);
+
+        $list = $this->getCache()->getItem('zslist');
+        while(true) {
+            $containerId = key($list);
+            $container = current($list);
+            $this->getLog()->log(Logger::DEBUG, "Checking if {$containerId} ({$container['name']}) needs to be cleaned up...");
+
+            if($container['status'] == Node::STATUS_UNJOINED) {
+                $this->getLog()->log(Logger::INFO, "Removing removed server {$container['id']} ({$container['name']}) from internal list");
+                unset($list[$containerId]);
+            }
+            if(!next($list)) {
+                break;
+            }
+        }
+
+        $this->getCache()->setItem('zslist', $list);
+
+        flock($fp, LOCK_UN);
+        fclose($fp);
+
+    }
+ 
+    protected function setContainerInfo($container, array $info) {
+        $fp = fopen($this->lockFile, 'w');
+        flock($fp, LOCK_EX);
         
-
-        //var_dump($containers);
-
-        /*
-        while(1) {
-                                    
-            
+        $list = $this->getCache()->getItem('zslist');
+        foreach($info as $k => $v) {
+            $list[$container['id']][$k] = $v;
         }
-        */
+        $this->getCache()->setItem('zslist', $list);
+
+        flock($fp, LOCK_UN);
+        fclose($fp);
+    }   
+
+    protected function retrieveRandomJoinedServer(\ZSDockerBroker\Variables $variables) {
+        $fp = fopen($this->lockFile, 'w');
+        flock($fp, LOCK_EX);
+        $joinedContainer = false;        
+
+        $list = $this->getCache()->getItem('zslist');
+        $availableServers = '';
+        foreach($list as $l) {
+            $availableServers .= "{$l['id']}\t{$l['cluster']}\t{$l['status']}\t{$l['name']}\n";
+        }
+        $this->getLog()->log(Logger::INFO, "Available servers: \n$availableServers\n");
+
+        foreach($list as $id => $container) {
+            if($container['status'] == Node::STATUS_JOINED 
+                    && $container['cluster'] = $variables->getClusterGroup()
+                    && $container['name'] != 'zsbroker') {
+                $joinedContainer = $container;
+                break;
+            }
+        }
+
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return $joinedContainer;
+    }
+
+    protected function isContainerForBrokerGroup($container, $variables) {
+        $group = $variables->getClusterGroup();
+        $this->getLog()->log(Logger::INFO, "Container {$container['id']} ({$container['name']}) Node group is {$container['cluster']}, broker group is {$group}");
+        return $container['cluster'] == $group;
     }
     
-    protected function getNextUnaddedContainer($containers) {
+    /**
+     * Get the next removed container
+     * @var array
+     */
+    protected function getNextRemovedServer($containers) {
+        $fp = fopen($this->lockFile, 'w');
+        flock($fp, LOCK_EX);
+        $nextRemove = false;
+                
+
+        $list = $this->getCache()->getItem('zslist');
+        foreach($list as $id => $container) {
+            if($container['status'] == Node::STATUS_JOINED && !array_key_exists($id, $containers)) {
+                $nextRemove = $container;
+                break;
+            }
+            $known = array_key_exists($id, $containers);
+
+            $this->getLog()->log(Logger::INFO, sprintf("Skipping %s container {$container['id']} ({$container['name']}) with status {$container['status']}", $known ? "known" : "unknown"));
+        }
+        
+        if($nextRemove) {
+            $this->getLog()->log(Logger::DEBUG, "Setting status ".Node::STATUS_UNJOINING." for container {$container['id']} ({$container['name']})");
+            $list[$nextRemove['id']]['status'] = Node::STATUS_UNJOINING;
+            $this->getCache()->setItem('zslist', $list);
+        }
+
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        return $nextRemove; 
+    }
+
+    /**
+     * @param array
+     * @param ZSDockerBroker\Variable
+     */ 
+    protected function getNextUnaddedContainer($containers, $variables) {
         //needs to be atomic - use by default a fs implementation (flock)
         //but provide possibility to use closure in the future
         $fp = fopen($this->lockFile, 'w');
@@ -140,23 +267,29 @@ class ZSDockerBroker {
         if(!is_array($list)) $list = array();
 
         foreach($containers as $container) {
-            if(!in_array($container['id'], array_keys($list))) {
+            if($this->isContainerForBrokerGroup($container, $variables) 
+                    &&  !in_array($container['id'], array_keys($list))
+                    && $container['name'] != 'zsbroker') {
                  $nextContainer = $container;
                  break;
             }
+            $this->getLog()->log(Logger::INFO, "Container {$container['id']} ({$container['name']}) is already known, skipping...");
         }
-        
-        $list[$nextContainer['id']] = Node::STATUS_JOINING;
- 
-        $this->getCache()->setItem('zslist', $list);
-        flock($fp, LOCK_UN);
 
+        if($nextContainer) {
+            $nextContainer['status'] = Node::STATUS_JOINING;
+         
+            $list[$nextContainer['id']] = $nextContainer;
+         
+            $this->getCache()->setItem('zslist', $list);
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        }
         return $nextContainer;
     }
 
-
     /**
-     * @return array An array of conatiners that are Zend Server nodes
+     * @return array An array of containers that are Zend Server nodes
      */
     protected function retrieveZSContainers() {
         $containers = array();
@@ -169,16 +302,19 @@ class ZSDockerBroker {
                     $matches = array();
                     preg_match("/{$this->key}=(.*)$/", $env, $matches);
                     
-                    $containers[] = array(
-                        'id' => $container->getId(),
-                        'cluster' => $matches[1],
-                        'name'    => preg_replace('/\W+/', '', $runtimeInfo['Name']),
-                        'ip'      => $runtimeInfo['NetworkSettings']['IPAddress'],
-                        'container' => $container
+                    $containers[$container->getId()] = array(
+                        'id'        => $container->getId(),
+                        'cluster'   => $matches[1],
+                        'name'      => substr($runtimeInfo['Name'], 1),
+                        'ip'        => $runtimeInfo['NetworkSettings']['IPAddress'],
+                        'container' => $container,
+                        'status'    => Node::STATUS_NEW,
+                        'clusterid' => null
                     );
                 }
             }
         }
+        $this->getLog()->log(Logger::DEBUG, "Found ".count($containers)." containers.");
         return $containers;
     }
 }
