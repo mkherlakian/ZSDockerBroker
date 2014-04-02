@@ -102,26 +102,29 @@ class ZSDockerBroker {
                 //var_dump($nextContainer);
                 //var_dump($this->getCache()->getItem('zslist'));
                 $this->getLog()->log(Logger::INFO, "Found a new container - ID: {$nextContainer['id']}, trying to join cluster...");
-                
-                $joinParameters = array(
-                    'servername' => $nextContainer['name'],
-                    'dbhost'     => $variables->getDbHost(),
-                    'dbuser'     => $variables->getDbUser(),
-                    'dbpass'     => $variables->getDbPassword(),
-                    'nodeip'     => $nextContainer['ip'],
-                    'dbname'     => $variables->getDbName(),
-                    'zsurl'      => "http://{$nextContainer['ip']}:10081/ZendServer",
-                    'zskey'      => $variables->getApiKeyname(),
-                    'zssecret'   => $variables->getApiKeysecret(),
-                ); 
-                $serverInfo = array();
-                $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
-                $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
+               
+                //Check if container is ready
+                if($this->isServerReady($nextContainer['ip'])) {
+                    $joinParameters = array(
+                        'servername' => $nextContainer['name'],
+                        'dbhost'     => $variables->getDbHost(),
+                        'dbuser'     => $variables->getDbUser(),
+                        'dbpass'     => $variables->getDbPassword(),
+                        'nodeip'     => $nextContainer['ip'],
+                        'dbname'     => $variables->getDbName(),
+                        'zsurl'      => $this->getServerUrl($nextContainer['ip']), 
+                        'zskey'      => $variables->getApiKeyname(),
+                        'zssecret'   => $variables->getApiKeysecret(),
+                    ); 
+                    $serverInfo = array();
+                    $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
+                    $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
 
-                $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
-                $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
+                    $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
+                    $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
+                }
             }
-           
+ 
             $removedServer = $this->getNextRemovedServer($containers);
             if($removedServer) {
                 $this->getLog()->log(Logger::INFO, "Server {$removedServer['id']} ({$removedServer['name']}) was removed, removing from cluster...");
@@ -144,7 +147,8 @@ class ZSDockerBroker {
                 $this->setContainerInfo($removedServer, array('status' => $status));
             }
 
-            $this->cleanUpList(); 
+            $this->cleanUpList();
+            usleep(500000); //sleep to avoid overwhelming the Docker server 
         }
     }
    
@@ -268,7 +272,8 @@ class ZSDockerBroker {
 
         foreach($containers as $container) {
             if($this->isContainerForBrokerGroup($container, $variables) 
-                    &&  !in_array($container['id'], array_keys($list))
+                    &&  (!in_array($container['id'], array_keys($list)) || 
+                            (in_array($container['id'], array_keys($list)) && $list[$container['id']]['status'] == Node::STATUS_JOINING))
                     && $container['name'] != 'zsbroker') {
                  $nextContainer = $container;
                  break;
@@ -316,5 +321,31 @@ class ZSDockerBroker {
         }
         $this->getLog()->log(Logger::DEBUG, "Found ".count($containers)." containers.");
         return $containers;
+    }
+
+    protected function getServerUrl($ip) {
+        return "http://$ip:10081/ZendServer";
+    } 
+
+    /**
+     * Checks if a server is ready by attempting to connect to its gui port
+     * @var string
+     */
+    public function isServerReady($ip) {
+        $url = $this->getServerUrl($ip);
+        $this->getLog()->log(Logger::INFO, "Initiating request to $url...");
+        $c = curl_init();
+        curl_setopt($c, CURLOPT_URL, $this->getServerUrl($ip));
+        curl_setopt($c, CURLOPT_AUTOREFERER, true);
+        curl_setopt($c, CURLOPT_CONNECTTIMEOUT, 5);
+        $success = @curl_exec($c);
+        @curl_close($c);
+        if(!$success) {
+            $this->getLog()->log(Logger::INFO, "Server $url not ready, retry later");
+        } else {
+            $this->getLog()->log(Logger::INFO, "Server $url is ready!");
+        }
+
+        return $success;        
     }
 }
