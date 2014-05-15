@@ -101,27 +101,37 @@ class ZSDockerBroker {
             if($nextContainer) {
                 //var_dump($nextContainer);
                 //var_dump($this->getCache()->getItem('zslist'));
-                $this->getLog()->log(Logger::INFO, "Found a new container - ID: {$nextContainer['id']}, trying to join cluster...");
-               
+                $this->getLog()->log(Logger::INFO, "Found a new container - ID: {$nextContainer['id']}, Checking if bootstrapped...");
+              
                 //Check if container is ready
                 if($this->isServerReady($nextContainer['ip'])) {
-                    $joinParameters = array(
-                        'servername' => $nextContainer['name'],
-                        'dbhost'     => $variables->getDbHost(),
-                        'dbuser'     => $variables->getDbUser(),
-                        'dbpass'     => $variables->getDbPassword(),
-                        'nodeip'     => $nextContainer['ip'],
-                        'dbname'     => $variables->getDbName(),
+                    //Check if server is bootstrapped
+                    $this->getLog()->log(Logger::INFO, "{$nextContainer['id']}, trying to join cluster...");
+                    $bootstrappedParams = array(
                         'zsurl'      => $this->getServerUrl($nextContainer['ip']), 
                         'zskey'      => $variables->getApiKeyname(),
-                        'zssecret'   => $variables->getApiKeysecret(),
-                    ); 
-                    $serverInfo = array();
-                    $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
-                    $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
+                        'zssecret'   => $variables->getApiKeysecret()
+                    );
 
-                    $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
-                    $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
+                    if($this->clusterOperations->isServerBootstrapped($bootstrappedParams)) {
+                        $joinParameters = array(
+                            'servername' => $nextContainer['name'],
+                            'dbhost'     => $variables->getDbHost(),
+                            'dbuser'     => $variables->getDbUser(),
+                            'dbpass'     => $variables->getDbPassword(),
+                            'nodeip'     => $nextContainer['ip'],
+                            'dbname'     => $variables->getDbName(),
+                            'zsurl'      => $this->getServerUrl($nextContainer['ip']), 
+                            'zskey'      => $variables->getApiKeyname(),
+                            'zssecret'   => $variables->getApiKeysecret(),
+                        ); 
+                        $serverInfo = array();
+                        $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
+                        $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
+
+                        $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
+                        $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
+                    }
                 }
             }
  

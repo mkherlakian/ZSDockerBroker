@@ -116,6 +116,38 @@ class ClusterOperations {
         return $success; 
     }
 
+    public function getSystemInfo(array $params) {
+        $defaults = array(
+            'zsurl' => '', 
+            'zskey' => '', 
+            'zssecret' => '', 
+            //'zsversion' => '6.1', 
+            'http' => '', 
+        ); 
+
+        $out = '';
+        $required = array('zsurl', 'zskey', 'zssecret');
+        $validated = $this->validateArgs($defaults, $required, $params);
+        extract($validated);
+
+        $command = "{$this->zsclient} getSystemInfo --zsurl=$zsurl --zskey=$zskey --zssecret=$zssecret";
+        if($http) $command .= " --http=$http";
+        
+        $success = $this->runCommand($command, $out);
+
+        return $out;
+    } 
+
+    public function isServerBootstrapped(array $params) {
+        $output = $this->getSystemInfo($params);
+var_dump($output);
+        if(stripos($output, 'Bootstrap is needed') !== false) {
+            return false;
+        }
+        return true;
+    }
+
+
     protected function runCommand($command, &$out = null) {
         $desc = array(
             1 => array('pipe', 'w'),
