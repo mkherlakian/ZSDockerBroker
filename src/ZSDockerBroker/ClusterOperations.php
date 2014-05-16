@@ -138,10 +138,10 @@ class ClusterOperations {
         return $out;
     } 
 
-    public function isServerBootstrapped(array $params) {
+    public function isServerBootstrappedAndReady(array $params) {
         $output = $this->getSystemInfo($params);
 var_dump($output);
-        if(stripos($output, 'Bootstrap is needed') !== false) {
+        if(stripos($output, 'Bootstrap is needed') !== false || stripos($output, 'pendingRestart') !== false) {
             return false;
         }
         return true;

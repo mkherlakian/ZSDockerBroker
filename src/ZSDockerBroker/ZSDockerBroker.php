@@ -113,7 +113,7 @@ class ZSDockerBroker {
                         'zssecret'   => $variables->getApiKeysecret()
                     );
 
-                    if($this->clusterOperations->isServerBootstrapped($bootstrappedParams)) {
+                    if($this->clusterOperations->isServerBootstrappedAndReady($bootstrappedParams)) {
                         $joinParameters = array(
                             'servername' => $nextContainer['name'],
                             'dbhost'     => $variables->getDbHost(),
