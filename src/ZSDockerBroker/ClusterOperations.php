@@ -88,7 +88,9 @@ class ClusterOperations {
             $id = (string)$xml->responseData->serverInfo->id;
             $this->getLog()->log(Logger::DEBUG, "Added server $servername, id $id");
             $serverInfo = array('clusterid' => $id);
-        } 
+        } else {
+            $serverInfo = array('clusterid' => 'No Id - An error occured joining the cluster');
+        }
         return $success;
     }
     
@@ -147,6 +149,19 @@ var_dump($output);
         return true;
     }
 
+    public function enableSessionCluster(array $params, &$serverInfo = null) {
+        $out = '';
+        $command = "{$this->zsclient} configurationStoreDirectives --directives='session.save_handler=cluster' --zsurl={$params['zsurl']} --zskey={$params['zskey']} --zssecret={$params['zssecret']}";
+        if (!empty($params['http'])) $command .= " --http='$http'";
+        $success = $this->runCommand($command, $out);
+        unset($command);
+        if ($success) {
+            $command = "{$this->zsclient} restartPhp --zsurl={$params['zsurl']} --zskey={$params['zskey']} --zssecret={$params['zssecret']}";
+            if (!empty($params['http'])) $command .= " --http='$http'";
+            $success = $this->runCommand($command, $out);
+        }
+        return $success;
+    }
 
     protected function runCommand($command, &$out = null) {
         $desc = array(

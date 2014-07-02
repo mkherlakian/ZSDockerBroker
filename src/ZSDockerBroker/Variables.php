@@ -60,8 +60,8 @@ class Variables {
      */
     public static function factoryFromEnv() {
         $vars = array('ZSAPINAME', 'ZSAPISECRET', 'DBHOST', 'DBNAME', 'DBUSER', 'DBPASS', 'ZSCLUSTERGROUP');
+        $notFound = array();
         foreach($vars as $var) {
-            $notFound = array();
             if(!getenv($var))
                 $notFound[] = $var;
         }
