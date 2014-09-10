@@ -50,6 +50,10 @@ class ZSDockerBroker {
      */
     protected $logger;
 
+     /**
+     * @var bool
+     */
+    protected $sesSaveHandlerCluster = false;
 
     public function __construct(\Docker\Docker $dockerClient, \ZSDockerBroker\ClusterOperations $co) {
         $this->dockerClient = $dockerClient;
@@ -128,7 +132,13 @@ class ZSDockerBroker {
                         $serverInfo = array();
                         $success = $this->clusterOperations->joinCluster($joinParameters, $serverInfo);
                         $status = $success ? Node::STATUS_JOINED : Node::JOIN_ERROR;
-
+                        if ((Node::STATUS_JOINED == $status) and (!$this->sesSaveHandlerCluster)) {
+                            $this->getLog()->log(Logger::INFO, 'Enabling SC for the cluster...');
+                            //Enable session clustering
+                            $joinParameters['serverid'] = $serverInfo['clusterid'];
+                            $success = $this->clusterOperations->enableSessionCluster($joinParameters, $serverInfo);
+                            if ($success) $this->sesSaveHandlerCluster = true;
+                        }
                         $this->getLog()->log(Logger::INFO, "Setting status $status, clusterid {$serverInfo['clusterid']} for container {$nextContainer['id']} ({$nextContainer['name']})");
                         $this->setContainerInfo($nextContainer, array('status' => $status, 'clusterid' => $serverInfo['clusterid']));
                     }
